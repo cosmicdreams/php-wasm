@@ -60,14 +60,18 @@ The project uses a custom fork at `seanmorris/emscripten` branch `sm-updates`. T
 
 ### Testing with Stock Emscripten
 
-To verify if these fixes have been upstreamed or if they're still required:
+The dockerfile supports a build argument to test with stock Emscripten:
 
 ```bash
-# Build with stock Emscripten (modify emscripten-builder.dockerfile)
-# Set: RUN git clone https://github.com/emscripten-core/emscripten.git
-# Instead of: RUN git clone https://github.com/seanmorris/emscripten.git
+# Build Docker image with stock Emscripten (no custom fork)
+docker build --build-arg USE_STOCK_EMSCRIPTEN=1 \
+  -t php-emscripten-builder:stock -f emscripten-builder.dockerfile .
 
-# Then test:
+# Build Docker image with custom fork (default)
+docker build -t php-emscripten-builder:custom -f emscripten-builder.dockerfile .
+
+# Then test with stock Emscripten:
+# (Update docker-compose.yaml to use php-emscripten-builder:stock)
 make clean
 make web-mjs PHP_VERSION=8.4
 

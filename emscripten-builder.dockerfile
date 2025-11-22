@@ -46,15 +46,27 @@ RUN apt-get update; \
 		pv \
 		jq
 
+# Emscripten Source Configuration
+# USE_STOCK_EMSCRIPTEN=0 (default): Use custom fork with fixes
+# USE_STOCK_EMSCRIPTEN=1: Use stock Emscripten (for testing upstream compatibility)
+#
+# To test stock Emscripten:
+#   docker build --build-arg USE_STOCK_EMSCRIPTEN=1 -t php-emscripten-builder .
+ARG USE_STOCK_EMSCRIPTEN=0
+
 # RUN rm -rf /emsdk/upstream/emscripten
 # ADD emscripten /emsdk/upstream/emscripten
 # RUN /emsdk/upstream/emscripten/bootstrap
 
-RUN cd /emsdk/upstream && {\
-	rm -rf emscripten;\
-	git clone https://github.com/seanmorris/emscripten.git emscripten --depth=1 --branch sm-updates;\
-	emscripten/bootstrap; \
-}
+RUN if [ "${USE_STOCK_EMSCRIPTEN}" = "1" ]; then \
+	echo "Using STOCK Emscripten from emsdk base image"; \
+else \
+	cd /emsdk/upstream && { \
+		rm -rf emscripten; \
+		git clone https://github.com/seanmorris/emscripten.git emscripten --depth=1 --branch sm-updates; \
+		emscripten/bootstrap; \
+	}; \
+fi
 
 RUN embuilder build USER
 
