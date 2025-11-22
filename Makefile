@@ -11,7 +11,8 @@
 	test-all-versions x-all-versions php-clean-all-versions \
 	demo-versions null \
 	archives assets rebuild reconfigure \
-	dynamic dynamic-libs.json
+	dynamic dynamic-libs.json \
+	verify verify-all check-deprecated show-emscripten-version
 
 MAKEFLAGS += --no-builtin-rules --no-builtin-variables --warn-undefined-variables --shuffle=random
 
@@ -1086,5 +1087,35 @@ demo: web-mjs worker-cgi-mjs web-dbg-mjs packages/sdl/libSDL2.so
 
 serve-demo: web-mjs worker-cgi-mjs web-dbg-mjs packages/sdl/libSDL2.so
 	npm run start --prefix ./demo-web
+
+########### WASM Compatibility Verification ###########
+
+verify:
+	PHP_VERSION=${PHP_VERSION} LIB_TYPE=${LIB_TYPE} ./scripts/verify-wasm-compatibility.sh
+
+verify-all:
+	@echo "Verifying all PHP versions..."
+	PHP_VERSION=8.4 ./scripts/verify-wasm-compatibility.sh || true
+	PHP_VERSION=8.3 ./scripts/verify-wasm-compatibility.sh || true
+	PHP_VERSION=8.2 ./scripts/verify-wasm-compatibility.sh || true
+	PHP_VERSION=8.1 ./scripts/verify-wasm-compatibility.sh || true
+	PHP_VERSION=8.0 ./scripts/verify-wasm-compatibility.sh || true
+
+check-deprecated:
+	@echo "Checking for deprecated Emscripten flags..."
+	@if grep -E "^\s*(-s\s*)?ASYNCIFY_LAZY_LOAD_CODE" Makefile packages/*/static.mak 2>/dev/null | grep -v "check-deprecated"; then \
+		echo "WARNING: Found deprecated flag: ASYNCIFY_LAZY_LOAD_CODE"; \
+	else \
+		echo "OK: No ASYNCIFY_LAZY_LOAD_CODE usage found"; \
+	fi
+	@if grep -E "^\s*(-s\s*)?USE_WEBGPU" Makefile packages/*/static.mak 2>/dev/null | grep -v "check-deprecated"; then \
+		echo "WARNING: Found deprecated flag: USE_WEBGPU"; \
+	else \
+		echo "OK: No USE_WEBGPU usage found"; \
+	fi
+	@echo "Deprecation check complete."
+
+show-emscripten-version:
+	${DOCKER_RUN} emcc --version
 
 null:

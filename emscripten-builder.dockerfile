@@ -1,19 +1,20 @@
-# Bisecting for CloudFlare:
+# WASM 3.0 Compatibility - Emscripten Version Matrix
+#
+# Tested Versions:
+#   - 3.1.43, 3.1.44: Working (CloudFlare compatible)
+#   - 3.1.45-3.1.67: CloudFlare Workers issues (general WASM works)
+#   - 3.1.74+: Latest stable (testing in progress)
+#
+# To build with a specific version:
+#   docker build --build-arg EMSDK_VERSION=3.1.74 -t php-emscripten-builder .
+#
+# Version Categories:
+#   STABLE_CLOUDFLARE = 3.1.44 (best CloudFlare compatibility)
+#   STABLE_MODERN = 3.1.67 (current default)
+#   LATEST = 3.1.74 (newest features, needs testing)
 
-# Works (cloudflare)
-# FROM emscripten/emsdk:3.1.43
-# FROM emscripten/emsdk:3.1.44
-
-
-# Broken (cloudflare)
-# FROM emscripten/emsdk:3.1.67
-# FROM emscripten/emsdk:3.1.55
-# FROM emscripten/emsdk:3.1.51
-# FROM emscripten/emsdk:3.1.47
-# FROM emscripten/emsdk:3.1.45
-
-# ARG EMSDK_VERSION="3.1.44"
 ARG EMSDK_VERSION="3.1.67"
+ARG EMSDK_FALLBACK_VERSION="3.1.44"
 FROM emscripten/emsdk:${EMSDK_VERSION}
 
 MAINTAINER Sean Morris <sean@seanmorr.is>

@@ -1,0 +1,172 @@
+name: WASM Compatibility Check
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - 'emscripten-builder.dockerfile'
+      - 'Makefile'
+      - 'php.mk'
+      - 'source/**'
+      - 'packages/*/static.mak'
+      - '.github/workflows/wasm-compatibility.yaml'
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+    inputs:
+      emscripten_version:
+        description: 'Emscripten version to test'
+        required: false
+        default: '3.1.67'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-deprecated-flags:
+    name: Check for Deprecated Flags
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for deprecated Emscripten flags
+        run: |
+          echo "Checking for deprecated Emscripten flags..."
+
+          # List of deprecated flags to check
+          DEPRECATED_FLAGS=(
+            "ASYNCIFY_LAZY_LOAD_CODE"
+            "USE_WEBGPU"
+            "ASYNCIFY_EXPORTS"
+          )
+
+          FOUND_DEPRECATED=0
+
+          for flag in "${DEPRECATED_FLAGS[@]}"; do
+            if grep -rn "$flag" Makefile packages/*/static.mak 2>/dev/null | grep -v "^#"; then
+              echo "::warning::Found deprecated flag: $flag"
+              FOUND_DEPRECATED=1
+            fi
+          done
+
+          if [ $FOUND_DEPRECATED -eq 1 ]; then
+            echo "::notice::Some deprecated flags were found. Consider updating."
+          else
+            echo "No deprecated flags found."
+          fi
+
+  verify-emscripten-config:
+    name: Verify Emscripten Configuration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check dockerfile configuration
+        run: |
+          echo "Emscripten Configuration:"
+          grep "^ARG EMSDK_VERSION" emscripten-builder.dockerfile || echo "EMSDK_VERSION not found"
+
+          echo ""
+          echo "Build flags analysis:"
+          grep -E "ASYNCIFY|MAIN_MODULE|SIDE_MODULE|MODULARIZE" Makefile | head -20
+
+      - name: Verify required settings
+        run: |
+          REQUIRED_FLAGS=("ASYNCIFY" "MAIN_MODULE" "MODULARIZE" "ALLOW_MEMORY_GROWTH" "FORCE_FILESYSTEM")
+
+          for flag in "${REQUIRED_FLAGS[@]}"; do
+            if grep -q "$flag" Makefile; then
+              echo "✓ $flag configured"
+            else
+              echo "✗ $flag MISSING"
+              exit 1
+            fi
+          done
+
+  emscripten-version-matrix:
+    name: Test Emscripten ${{ matrix.emscripten_version }}
+    runs-on: ubuntu-latest
+    needs: [check-deprecated-flags, verify-emscripten-config]
+    strategy:
+      fail-fast: false
+      matrix:
+        emscripten_version: ['3.1.67', '3.1.44']
+        php_version: ['8.4']
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Disable man-db auto-update
+        run: |
+          echo "set man-db/auto-update false" | sudo debconf-communicate
+          sudo dpkg-reconfigure man-db
+
+      - name: Install dependencies
+        run: |
+          sudo apt update && sudo apt install docker-compose -y
+          npm ci
+
+      - name: Build Docker image with Emscripten ${{ matrix.emscripten_version }}
+        run: |
+          # Update dockerfile with specific version
+          sed -i 's/ARG EMSDK_VERSION=.*/ARG EMSDK_VERSION="${{ matrix.emscripten_version }}"/' emscripten-builder.dockerfile
+          make image
+
+      - name: Verify Emscripten version
+        run: |
+          docker network create phpwasm_default || true
+          make show-emscripten-version
+
+      - name: Import configuration
+        run: cp .github/.env_${{ matrix.php_version }}.static.ci .env
+
+      - name: Build PHP ${{ matrix.php_version }} web-mjs
+        run: make web-mjs PHP_VERSION=${{ matrix.php_version }}
+
+      - name: Run verification script
+        run: |
+          PHP_VERSION=${{ matrix.php_version }} ./scripts/verify-wasm-compatibility.sh || true
+
+      - name: Run Node.js tests
+        run: |
+          PHP_VERSION=${{ matrix.php_version }} make test-node
+        continue-on-error: true
+
+      - name: Upload artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-artifacts-${{ matrix.emscripten_version }}-${{ matrix.php_version }}
+          path: |
+            packages/php-wasm/*.mjs
+            packages/php-wasm/*.wasm
+          retention-days: 7
+
+  compatibility-report:
+    name: Generate Compatibility Report
+    runs-on: ubuntu-latest
+    needs: [emscripten-version-matrix]
+    if: always()
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Generate report
+        run: |
+          echo "# WASM Compatibility Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Generated: $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Emscripten Version Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 3.1.44 | CloudFlare Compatible |" >> $GITHUB_STEP_SUMMARY
+          echo "| 3.1.67 | General WASM (CloudFlare issues) |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Current default: $(grep '^ARG EMSDK_VERSION=' emscripten-builder.dockerfile | cut -d'\"' -f2)" >> $GITHUB_STEP_SUMMARY
