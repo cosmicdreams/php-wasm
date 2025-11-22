@@ -12,7 +12,8 @@
 	demo-versions null \
 	archives assets rebuild reconfigure \
 	dynamic dynamic-libs.json \
-	verify verify-all check-deprecated show-emscripten-version
+	verify verify-all check-deprecated show-emscripten-version \
+	jspi-web-mjs jspi-worker-mjs jspi-node-mjs jspi-all compare-async-modes
 
 MAKEFLAGS += --no-builtin-rules --no-builtin-variables --warn-undefined-variables --shuffle=random
 
@@ -382,7 +383,17 @@ SAPI_PHPDBG_PATH=sapi/phpdbg/php${PHP_SUFFIX}-dbg-${ENVIRONMENT}.${BUILD_TYPE}.$
 PHP_CLI_OBJS=sapi/embed/php_embed.lo
 
 MAIN_MODULE?=1
+
+## Async Mode Configuration
+## ASYNCIFY=1 : Legacy Asyncify (default, broad compatibility)
+## ASYNCIFY=2 : JSPI - JavaScript Promise Integration (modern, smaller binaries)
+##              Requires Chrome 119+ or Firefox with flags
+## ASYNCIFY=0 : Disabled (breaks async operations)
 ASYNCIFY?=1
+
+## JSPI-specific exports (only used when ASYNCIFY=2)
+## Add exported functions that need async support
+JSPI_EXPORTS?=
 
 BUILD_FLAGS+=-f ../../php.mk \
 	-j${CPU_COUNT} -l${MAX_LOAD} \
@@ -415,6 +426,7 @@ BUILD_FLAGS+=-f ../../php.mk \
 		-s AUTO_NATIVE_LIBRARIES=0          \
 		-s AUTO_JS_LIBRARIES=0              \
 		-s ASYNCIFY=${ASYNCIFY}             \
+		$(if $(filter 2,${ASYNCIFY}),-s JSPI_EXPORTS=${JSPI_EXPORTS},) \
 		-I /src/third_party/php${PHP_VERSION}-src/ \
 		-I /src/third_party/php${PHP_VERSION}-src/Zend \
 		-I /src/third_party/php${PHP_VERSION}-src/main \
@@ -1117,5 +1129,32 @@ check-deprecated:
 
 show-emscripten-version:
 	${DOCKER_RUN} emcc --version
+
+########### JSPI Build Targets ###########
+## Build with JSPI (JavaScript Promise Integration) instead of legacy Asyncify
+## JSPI produces smaller binaries but requires Chrome 119+ or Firefox with flags
+
+jspi-web-mjs:
+	$(MAKE) web-mjs ASYNCIFY=2
+
+jspi-worker-mjs:
+	$(MAKE) worker-mjs ASYNCIFY=2
+
+jspi-node-mjs:
+	$(MAKE) node-mjs ASYNCIFY=2
+
+jspi-all:
+	$(MAKE) mjs ASYNCIFY=2
+
+## Compare binary sizes between Asyncify and JSPI
+compare-async-modes:
+	@echo "Building with legacy Asyncify (ASYNCIFY=1)..."
+	$(MAKE) web-mjs ASYNCIFY=1 PHP_VARIANT=_asyncify
+	@echo ""
+	@echo "Building with JSPI (ASYNCIFY=2)..."
+	$(MAKE) web-mjs ASYNCIFY=2 PHP_VARIANT=_jspi
+	@echo ""
+	@echo "Size comparison:"
+	@ls -lh packages/php-wasm/php${PHP_VERSION}_asyncify-web.mjs.wasm packages/php-wasm/php${PHP_VERSION}_jspi-web.mjs.wasm 2>/dev/null || echo "Build files not found"
 
 null:

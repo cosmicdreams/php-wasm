@@ -40,6 +40,47 @@ EXPORTED_RUNTIME_METHODS = ["ccall", "UTF8ToString", "lengthBytesUTF8",
                             "stringToUTF8", "getValue", "setValue", "FS", "ENV"]
 ```
 
+## Custom Emscripten Fork Analysis
+
+The project uses a custom fork at `seanmorris/emscripten` branch `sm-updates`. This section documents the changes and their purpose.
+
+### Fork Changes (6 commits)
+
+1. **IDBFS Permissions Fix** (`src/library_idbfs.js`)
+   - Ignores file permissions during sync operations
+   - Prevents permission-related errors in browser IndexedDB
+
+2. **Dynamic Linking Console Fix** (`system/lib/libc/dynlink.c`)
+   - Replaces `emscripten/console.h` with standard `printf`
+   - Fixes SIDE_MODULE compilation issues
+
+3. **Preload Target Path Fix** (`tools/link.py`)
+   - Fixes preload data target path generation
+   - Ensures assets are correctly located in the virtual filesystem
+
+### Testing with Stock Emscripten
+
+To verify if these fixes have been upstreamed or if they're still required:
+
+```bash
+# Build with stock Emscripten (modify emscripten-builder.dockerfile)
+# Set: RUN git clone https://github.com/emscripten-core/emscripten.git
+# Instead of: RUN git clone https://github.com/seanmorris/emscripten.git
+
+# Then test:
+make clean
+make web-mjs PHP_VERSION=8.4
+
+# Run tests to verify functionality:
+make test-node PHP_VERSION=8.4
+```
+
+### Key Areas to Test with Stock Emscripten
+
+1. **IDBFS sync** - File persistence in browser
+2. **Dynamic extension loading** - `.so` file loading works
+3. **Asset preloading** - Virtual filesystem has correct paths
+
 ## Emscripten Upgrade Considerations
 
 ### ASYNCIFY to JSPI Migration
@@ -57,9 +98,50 @@ EXPORTED_RUNTIME_METHODS = ["ccall", "UTF8ToString", "lengthBytesUTF8",
 - May require code changes in JavaScript integration layer
 
 **Migration Strategy**:
-1. Keep ASYNCIFY as default for broad compatibility
-2. Add JSPI build variant for modern environments
-3. Feature-detect at runtime when possible
+Since we're optimizing for the future only, JSPI is the target async mode.
+
+### JSPI Build Commands
+
+```bash
+# Build web target with JSPI
+make jspi-web-mjs PHP_VERSION=8.4
+
+# Build worker target with JSPI
+make jspi-worker-mjs PHP_VERSION=8.4
+
+# Build Node.js target with JSPI
+make jspi-node-mjs PHP_VERSION=8.4
+
+# Build all mjs targets with JSPI
+make jspi-all PHP_VERSION=8.4
+
+# Compare binary sizes between Asyncify and JSPI
+make compare-async-modes PHP_VERSION=8.4
+```
+
+### Manual JSPI Configuration
+
+You can also enable JSPI directly:
+
+```bash
+# Build any target with JSPI by setting ASYNCIFY=2
+make web-mjs ASYNCIFY=2 PHP_VERSION=8.4
+
+# Specify custom JSPI exports if needed
+make web-mjs ASYNCIFY=2 JSPI_EXPORTS="['_main','_run_php']" PHP_VERSION=8.4
+```
+
+### JavaScript Integration
+
+Both ASYNCIFY and JSPI work with the same JavaScript API:
+
+```javascript
+// This works with both ASYNCIFY=1 (legacy) and ASYNCIFY=2 (JSPI)
+const result = await Module.ccall('functionName', 'number', ['string'], ['arg'], {async: true});
+```
+
+The key difference is that JSPI uses native JavaScript Promise integration
+at the VM level, while ASYNCIFY transforms the WASM code to support unwinding/rewinding
 
 ### Deprecated Flags to Address
 
@@ -136,6 +218,29 @@ make show-emscripten-version
 
 # Validate WASM binary (requires wabt)
 wasm-validate packages/php-wasm/php8.4-web.mjs.wasm
+```
+
+### WASM-Specific Test Files
+
+The following test files verify WASM-specific behavior:
+
+| File | Purpose |
+|------|---------|
+| `test/wasm-features.mjs` | Memory growth, async operations, module instantiation, error handling |
+| `test/dynamic-libs.mjs` | SIDE_MODULE loading, extension discovery, isolation tests |
+| `test/benchmarks.mjs` | Performance baselines, binary size tracking, memory usage |
+
+Run these tests directly:
+
+```bash
+# WASM features tests
+node --test test/wasm-features.mjs
+
+# Dynamic library tests (requires dynamic build)
+LIB_TYPE=dynamic node --test test/dynamic-libs.mjs
+
+# Benchmark tests
+node --test test/benchmarks.mjs
 ```
 
 ## Future WASM Features to Consider
